@@ -86,9 +86,9 @@ Our analysis also has certain limitations that should be acknowledged. The assum
 
 ### Acknowledgement: 
 This Case Study is inspired by and based on the following:
-• Provost F, Fawcett T. (2013) Data Science for Business: What you need to know about
+- Provost F, Fawcett T. (2013) Data Science for Business: What you need to know about
 data mining and data-analytic thinking. Sebastopol, CA: O’Reilly Media, Inc.
-• Cohen MC, Guetta CD, Jiao K, Provost F. (2018) Data-driven investment strategies
+- Cohen MC, Guetta CD, Jiao K, Provost F. (2018) Data-driven investment strategies
 for peer-to-peer lending: a case study for teaching data science. Big Data 6:3, 191–213,
 DOI: 10.1089/ big.2018.0092.
 
