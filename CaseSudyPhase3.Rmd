@@ -1,0 +1,363 @@
+---
+title: 'Case Study Phase 3: Predictive Modeling'
+author: "Samiya Islam"
+date: "2023-12-18"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: yes
+    toc_depth: 2
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: '2'
+    df_print: paged
+header-includes: \usepackage{fancyhdr}
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{=tex}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{Created by Samiya Islam}  
+\fancyfoot[R]{\thepage}  
+\newpage
+```
+
+------------------------------------------------------------------------
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Importing all the libraries we need
+```{r}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(cluster)
+library(broom)
+library(corrplot)
+```
+
+```{r}
+# Load the cleaned data
+load("/Users/samiya/Downloads/CASESTUDY/clean.RData")
+data.cs <- na.omit(data.cs)
+# Looking at the data
+head(data.cs)
+str(data.cs)
+```
+
+(i).  Variables for Clustering Analysis:
+Credit score - this reflects the borrower's credit worthiness. Higher credit scores are generally associated with lower default risk.
+Loan amount - Larger loan amounts might be associated with higher risk, as the borrower may face greater financial challenges in repaying large sums
+Interest Rate - higher interest rate on a loan or credit product is often associated with a lower credit score
+Income - Higher income levels generally indicate a better ability to repay loans
+
+We also have created an outlier function to avoid redundancy.
+```{r}
+cVars <- c("loan_amnt", "funded_amnt", "annual_inc", "int_rate", "dti", "revol_bal", "loan_length")
+c <- data.cs[cVars]
+#a function to check if a point is an outlier
+is_outlier <- function(x) {
+  q <- quantile(x)
+  iqr <- IQR(x)
+  return((x < q[2] - 1.5 * iqr) | (x > q[4] + 1.5 * iqr))
+}
+```
+
+
+(ii). K-Means Clustering (lecture 21)
+It partitions data into K clusters based on the mean value of the features, and is effective for numeric data
+We will choose the most important variables and prepare them for our clustering analysis
+Then we’ll decide how many clusters we want and visualize the clusters
+From the visualization and analysis we’ll try to assign grades to each cluster
+
+
+## CLUSTERS OF 14 WITH OUTLIERS and its plot: 
+
+```{r}
+kmCluster <- kmeans(c, centers = 14)
+kmCluster
+principalCA <- prcomp(c, scale. = TRUE) # now we are going to be performing PCA
+principalCAData <- as.data.frame(principalCA$x[, 1:2])
+# adding cluster assignments to the PCA data
+principalCAData$Cluster <- as.factor(kmCluster$cluster)
+# Plotting clusters in PCA space
+ggplot(principalCAData, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point() +
+  theme_minimal()
+
+```
+
+## 14 clusters without outliers and its plot:
+```{r}
+# Identify and filter out outliers
+outlier_indices <- apply(c, 2, is_outlier)
+cNoOutliers <- c
+cNoOutliers[outlier_indices] <- NA
+cNoOutliers <- cNoOutliers[complete.cases(cNoOutliers), ] # remove rows without outliers
+kmCluster <- kmeans(cNoOutliers, centers = 14) # apply k-means clustering
+kmCluster
+# Plot of 14 clusters without outliers
+# PCA on the modified cluster data without outliers
+principalCANoOutliers <- prcomp(cNoOutliers, scale. = TRUE)
+principalCADataNoOutliers <- as.data.frame(principalCANoOutliers$x[, 1:2])
+# adding cluster assignments to the PCA data
+principalCADataNoOutliers$Cluster <- as.factor(kmCluster$cluster)
+# Plot clusters in PCA space
+ggplot(principalCADataNoOutliers, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point() +
+  theme_minimal()
+```
+
+Since we our primary concern is to find loans with similar risk profiles and grouped them together, we are prioritizing the WCSS values that is lower. In this case when we do clustering without the outliers we get a lower WCSS value. It indicate that the loans within each cluster are more similar in terms of their characteristics, which could be valuable for assigning grades based on loan characteristics.
+
+
+## CLUSTERS OF 10 WITHOUT OUTLIERS and its plot:
+```{r}
+# identify and filter out outliers
+outlier_indices <- apply(c, 2, is_outlier)
+cNoOutliers <- c
+cNoOutliers[outlier_indices] <- NA
+cNoOutliers <- cNoOutliers[complete.cases(cNoOutliers), ] # remove rows without outliers
+kmCluster <- kmeans(cNoOutliers, centers = 10) # Apply k-means clustering
+# PCA on the modified cluster data without outliers
+principalCANoOutliers <- prcomp(cNoOutliers, scale. = TRUE)
+principalCADataNoOutliers <- as.data.frame(principalCANoOutliers$x[, 1:2])
+# Add cluster assignments to the PCA data
+principalCADataNoOutliers$Cluster <- as.factor(kmCluster$cluster)
+# Plot clusters in PCA space
+ggplot(principalCADataNoOutliers, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point() +
+  theme_minimal()
+
+```
+
+
+## CLUSTERS OF 7 WITHOUT OUTLIERS and its plot:
+```{r}
+outlier_indices <- apply(c, 2, is_outlier)
+cNoOutliers <- c
+cNoOutliers[outlier_indices] <- NA
+cNoOutliers <- cNoOutliers[complete.cases(cNoOutliers), ] # remove rows without outliers
+kmCluster <- kmeans(cNoOutliers, centers = 7) # apply k-means clustering
+# PCA on the modified cluster data without outliers
+principalCANoOutliers <- prcomp(cNoOutliers, scale. = TRUE)
+principalCADataNoOutliers <- as.data.frame(principalCANoOutliers$x[, 1:2])
+# adding cluster assignments to the PCA data
+principalCADataNoOutliers$Cluster <- as.factor(kmCluster$cluster)
+# Plot clusters in PCA space
+ggplot(principalCADataNoOutliers, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point() +
+  theme_minimal()
+
+```
+
+(iii) Silhouette Analysis (lecture 21)
+Measures how similar a point is to its own cluster compared to other clusters. The silhouette score ranges from -1 to 1, where a high value indicates that the data point is well matched to its own cluster and poorly matched to neighboring clusters
+
+
+```{r}
+# Calculate silhouette scores
+silhouetteScores <- silhouette(groups, d)
+
+# Mean silhouette width
+meanS <- mean(silhouetteScores[, "sil_width"])
+print(paste("Mean Silhouette Width:", meanS))
+
+# Create a data frame for clustering and grade
+set.seed(123)  # Setting a seed for reproducibility
+sampled_indices <- sample(nrow(c),0.0001 * nrow(c))  
+# Adjust the sample size as needed
+
+clusterata <- data.frame(c[sampled_indices, ], 
+                           Cluster = kmCluster$cluster[sampled_indices], 
+                           Grade = data.cs$grade[sampled_indices])
+
+# Cross-tabulation
+cross_table <- table(cluster_data$Grade, cluster_data$Cluster)
+print(cross_table)
+
+```
+The Mean Silhouette Width is 0.576186107572439, which indicates a moderate level of separation between clusters.
+
+
+## 3.2 Understanding Lending Behavior 
+
+```{r}
+str(c)
+```
+
+## Linear Regression:
+Since we are interested in understanding how different variables/features impact the loan amount, focusing on "loan_amnt" would be appropriate as it represents the total amount of the loan applied for by the borrower. 
+
+```{r}
+# Impute missing values
+c[is.na(c)] <- 0  # Replace missing values with 0 for simplicity 
+# linear regression model
+linearModel <- lm(loan_amnt ~ ., data = c)
+# Model summary
+summary(linearModel)
+
+```
+
+According to the summary of the linear model, it seems like the funded amount and interest rate have significant impacts on the loan amount, while annual income, debt-to-income ratio (dti), revolving balance (revol_bal), and loan length do not appear to have strong impacts based on the coefficients and p-values. 
+
+The residual standard error (43.93) is the standard deviation of the residuals, which represents the average distance that the observed values fall from the regression line. It provides a measure of the model's accuracy in predicting loan amounts.The R-squared value (1) indicates that the model explains 100% of the variance in the loan amount, which suggests that the model perfectly fits the data. 
+
+```{r}
+# Check model diagnostics
+par(mfcol = c(2, 2))
+plot(linearModel)
+```
+
+```{r}
+plot_data <- fortify(linearModel)
+residuals <- residuals(linearModel)
+fitted_values <- fitted(linearModel)
+scale <- sigma(linearModel)
+theoretical_quantiles <- qqnorm(residuals(linearModel))$x
+leverage <- hatvalues(linearModel)
+
+# Summary 
+summary(residuals)
+summary(fitted_values)
+summary(scale)
+summary(leverage)
+summary(theoretical_quantiles)
+
+
+```
+
+
+
+
+```{r}
+# Interpret coefficients
+coef_table <- tidy(linearModel)
+print(coef_table)
+```
+
+
+The coefficient for funded_amnt (1.00) indicates that a one-unit increase in funded amount is associated with a one-unit increase in the loan amount. This relationship is expected since funded amount and loan amount are likely to be strongly correlated. The coefficient for int_rate (3.36) indicates that for each one-unit increase in interest rate, the loan amount increases by approximately 3.369 units. The p-value (1.24) is very small, indicating that this variable is statistically significant and has a significant impact on the loan amount.
+
+Also based on the table,the coefficients and p-values from the linear regression model, the variables "annual_inc," "dti," "revol_bal," and "loan_length" are not as significant in terms of their impact on the loan amount. For annual_inc, coefficient estimate is very small, indicating that a one-unit increase in annual income is associated with a negligible increase in the loan amount. Additionally, the p-value (0.434) is relatively high, suggesting that this variable is not statistically significant at the conventional significance level of 0.05. Therefore, annual income may not have a significant impact on the loan amount in this model. Also for dti, the coefficient estimate is small and negative, indicating that a one-unit increase in the debt-to-income ratio is associated with a small decrease in the loan amount. However, the p-value (0.166) is relatively high, suggesting that this variable is not statistically significant at the conventional significance level of 0.05. Therefore, the debt-to-income ratio may not have a significant impact on the loan amount in this model. revol_bal and loan_length is also not significant. 
+
+```{r}
+# correlation matrix
+correlation_matrix <- cor(c)
+# Create a heatmap
+corrplot(correlation_matrix, method = "color", type = "upper", order = "hclust")
+
+```
+
+
+```{r}
+# Create a scatterplot matrix
+pairs(c)
+
+```
+
+
+
+## 3.3 Investment Strategies
+
+# Question 1:
+```{r}
+# Split data into training (70%) and testing (30%) sets
+set.seed(123)  # for reproducibility
+sample_index <- sample(nrow(data.cs), 0.7 * nrow(data.cs))
+train_data <- data.cs[sample_index, ]
+test_data <- data.cs[-sample_index, ]
+
+# Build a return-based regression model for each return variable (M1, M2, etc.)
+return_variables <- c("ret_PESS", "ret_OPT")  # Replace with actual return variable names
+results <- list()
+
+for (return_var in return_variables) {
+  # Build a regression model using the training set
+  model <- lm(paste(return_var, "~ loan_amnt + funded_amnt + annual_inc + int_rate", sep = ""), data = train_data)
+  model
+  # Evaluate the model on the testing set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate performance metrics (e.g., Mean Absolute Error, Mean Squared Error, etc.)
+  # Here, we're using Mean Absolute Error (MAE) as an example
+  mae <- mean(abs(predictions - test_data[[return_var]]))
+  
+  # Store the results
+  results[[return_var]] <- list(
+    model = model,
+    predictions = predictions,
+    mae = mae
+  )
+}
+
+# Display the performance results
+for (return_var in return_variables) {
+  cat("Performance for", return_var, ":\n")
+  cat("Mean Absolute Error (MAE):", results[[return_var]]$mae, "\n")
+  cat("\n")
+}
+
+# The smaller the MAE, the better the model's predictions (from training data) align with the actual outcome (test data)
+# The MAE for ret_PESS is approximately 0.1023. 
+# This means, on average, the predicted values from your regression model deviate by 0.1023 
+# from the actual values of ret_PESS in your testing set. 
+# The lower the MAE, the better the model's predictions align with the actual outcomes.
+# MAE values provide a measure of the accuracy of your regression models in predicting the specified 
+# return variables (ret_PESS and ret_OPT). Lower MAE values generally suggest better predictive performance.
+
+```
+
+
+Question 2: i and ii
+```{r}
+# Random Strategy (Rand)
+set.seed(123)  # for reproducibility
+rand_loans <- sample_n(test_set, 1000)
+rand_return_M1 <- mean(rand_loans$M1, na.rm = TRUE)
+rand_return_M2 <- mean(rand_loans$M2, na.rm = TRUE)
+
+# Return-based Strategy (Ret)
+ret_loans_M1 <- head(test_set[order(predictions_M1, decreasing = TRUE), ], 1000)
+ret_return_M1 <- mean(ret_loans_M1$M1, na.rm = TRUE)
+
+ret_loans_M2 <- head(test_set[order(predictions_M2, decreasing = TRUE), ], 1000)
+ret_return_M2 <- mean(ret_loans_M2$M2, na.rm = TRUE)
+
+# Best Possible Solution (Best)
+best_loans_M1 <- head(test_set[order(test_set$M1, decreasing = TRUE), ], 1000)
+best_return_M1 <- mean(best_loans_M1$M1, na.rm = TRUE)
+
+best_loans_M2 <- head(test_set[order(test_set$M2, decreasing = TRUE), ], 1000)
+best_return_M2 <- mean(best_loans_M2$M2, na.rm = TRUE)
+
+# Create a table with the returns
+returns_table <- data.frame(
+  Strategy = c("Rand", "Ret", "Best"),
+  M1 = c(rand_return_M1, ret_return_M1, best_return_M1),
+  M2 = c(rand_return_M2, ret_return_M2, best_return_M2)
+)
+
+# Print the returns table
+print(returns_table)
+```
+
+(iii) Based on the above table, which investment strategy performs best? What can you tell about using the Random strategy? Does it cause you any loss? Why do I think that is the case? How do the data-driven strategy compare to Random as well as BEST?
+
+Investment Strategy Performs Best:
+For M1, the Best strategy has the highest return (0.1357).
+For M2, the Best strategy also has the highest return (2.840).
+
+Rand: The Random strategy resulted in negative returns for both M1 and M2. This suggests that randomly picking loans led to a loss. The negative returns indicate that, on average, the loans randomly selected did not perform well.
+Ret: The Return-based strategy outperforms the Random strategy, but it still has negative returns for both M1 and M2. While it performs better than random selection, it doesn't yield positive returns for either target variable.
+Best: It selects the top-performing loans in hindsight, results in positive returns for both M1 and M2.It significantly outperforms both Random and Return-based strategies, especially for M2.
+
+The Random strategy appears to cause losses, as indicated by the negative returns for both M1 and M2. We believe it reinforces the idea that randomly selecting loans without a data-driven approach can result in poor performance. The Return-based strategy, while an improvement over the Random strategy, still doesn't achieve positive returns for either M1 or M2. This suggests that the linear regression models might need improvement or that other factors not considered in the models could be influencing returns. The Best strategy, which represents a hypothetical scenario where one knows the future performance of loans, outperforms both Random and Return-based strategies, emphasizing the importance of hindsight in investment decision-making.
+
+
