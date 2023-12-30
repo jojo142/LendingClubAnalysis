@@ -1,0 +1,553 @@
+---
+title: 'CaseStudy Phase II: Data Cleaning, Preparation & Exploration'
+author: "Samiya Islam"
+date: "2023-11-12"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: yes
+    toc_depth: 2
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: '2'
+    df_print: paged
+header-includes: \usepackage{fancyhdr}
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{=tex}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{Created by Samiya Islam}  
+\fancyfoot[R]{\thepage}  
+\newpage
+```
+
+------------------------------------------------------------------------
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(lubridate)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+
+directory_path <- "/Users/samiya/Downloads/CASESTUDY/2003_download" # path to the directory where all the *.csv.zip files are located 
+# Define the output path for the prepared data file .Rdata
+clean_data_file = file.path(dirname(directory_path), "clean_data.Rdata") # path to save cleaned data
+
+```
+
+```{r}
+# Identify the columns we'll be keeping from the dataset
+keep_cols <- c("id", "loan_amnt", "funded_amnt", "term", "int_rate", "installment", "grade", "emp_length",
+               "home_ownership", "annual_inc", "verification_status", "issue_d", "loan_status",
+               "purpose", "dti", "delinq_2yrs", "earliest_cr_line", "open_acc", "pub_rec",
+               "fico_range_high", "fico_range_low", "revol_bal", "revol_util", "total_pymnt",
+               "last_pymnt_d", "recoveries")
+
+# list of features to use for this study as indicated in the handout
+
+# Identify the type of each of these column based on your CS-Phase 1 response
+# Numerical features
+numerical_cols <- c("loan_amnt", "funded_amnt", "int_rate", "installment", "annual_inc", "dti",
+                    "delinq_2yrs", "open_acc", "pub_rec", "fico_range_high", "fico_range_low",
+                    "revol_bal", "total_pymnt", "recoveries")
+
+# Categorical features
+categorical_cols <- c("id", "term", "grade", "emp_length", "home_ownership", "verification_status",
+                      "issue_d", "loan_status", "purpose", "earliest_cr_line", "revol_util",
+                      "last_pymnt_d")
+percentage_cols = c('int_rate', 'revol_util')
+date_cols = c('issue_d', 'earliest_cr_line', 'last_pymnt_d')
+
+```
+
+```{r}
+# All categorical columns other than "loan_status" will be used as
+# discrete or factor features
+
+discrete_features <- setdiff(categorical_cols, "loan_status")
+
+# All numeric columns will be used as continuous features
+continuous_features <- c(numerical_cols, percentage_cols)
+```
+
+```{r}
+# We will now create a function that can read files from a 
+# directory/folder  and then combine them into single tibble
+ingest_files <- function(directory, keep.cols) {
+  # If the directory has no trailing slash, add one
+  if (grepl("/", directory, fixed = TRUE) == FALSE) {
+    directory <- paste0(directory, "/")
+  }
+
+  # Get list of all files from the directory
+  all_files <- list.files(directory, full.names = TRUE) # full.names gives full path of the file
+  print(all_files)
+
+  # Initialize an empty list to store the dataframes
+  output <- list()
+
+  # Read each file into a dataframe
+  for (i in all_files) {
+    print(paste("Reading file", i)) # remeber read_csv can read compressed files directly
+    df <- read.csv(i, header = TRUE, skip = 1, stringsAsFactors = FALSE) 
+    # read each with dtype='str' and skip_rows =1; hint i is the filename. 
+    
+    # Some of the files have "summary" lines that, for example
+    # read "Total number of loans number in Policy 1: ....."
+    # To remove those lines, find any lines with non-integer IDs
+    # and remove them
+    
+    # convert id column to numeric. Then removes rows with NA values
+    df$id <- as.numeric(df$id)
+    # Remove rows with non-integer IDs
+    df <- df |>
+      filter(!is.na(id) & id %% 1 == 0) # mutate to integer
+       # drop NA for id columns
+    invalid_rows <- df$id %>% sapply(is.integer)
+    
+    # select only the relevant columns from the dataframe
+    df <- df |>
+      select(all_of(keep.cols)) # select columns that we want to retain
+    # Add the dataframe to the output list
+    output[[i]] <- df
+  }
+
+  # Combine the list into a single very large dataframe
+  map_dfr(output, bind_rows) # i haven;t taught you this function, so don't worry about it. 
+  result <- dplyr::bind_rows(output)  # this line is basically taking a list and stacking them up into a single dataframe
+  return(result)
+  
+}
+```
+
+```{=tex}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{Created by Samiya Islam}  
+\fancyfoot[R]{\thepage}  
+\newpage
+```
+
+```{r, results='hide'}
+# Read the the data now
+# We define dthe function above to read the files from a directory/folder
+data.cs <- ingest_files("/Users/samiya/Downloads/CASESTUDY/2003_download", keep_cols) # call the function that you defined above to read the data
+```
+
+```{r}
+# Check the column names in data.cs
+names(data.cs)
+```
+
+```{=tex}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{Created by Samiya Islam}  
+\fancyfoot[R]{\thepage}  
+\newpage
+```
+## Interest rate data cleaning and calculation
+
+```{r}
+data.cs$int_rate <- gsub("%", "", data.cs$int_rate)  # removing the percentage sign
+data.cs |>
+  group_by(grade) |> # Grouping the data by the 'grade' column
+  summarise(
+    defaultRate = (sum(loan_status == "Charged Off")) / n(),
+    # finding the minimum interest rate, ignoring NA values
+    intMin = min(int_rate, na.rm = TRUE),
+    # finding the maximum interest rate, ignoring NA values
+    intMax = max(int_rate, na.rm = TRUE),
+    # average interest rate, converting to numeric and ignoring NA values
+    intAVG = mean(as.numeric(int_rate), na.rm = TRUE),
+  )
+```
+
+### Typecase the columns of this large data now as per the variables defined above
+
+Typecasting means if a column is numeric, convert it to numeric type
+
+```{r}
+data.cs <- data.cs |> 
+  mutate(
+    # we are using across function from dplyr library
+    # to apply all_of function to a selection of columns in a data.cs
+  across(all_of(numerical_cols), as.numeric), # converting all columns to numeric
+  across(all_of(categorical_cols), as.character) # converting all columns to character
+  )
+
+```
+
+### Clean up percentage columns
+
+Notice that percentage columns contain % sign. Let's remove to only keep
+the numbers. Hint: use how to use parse_number function
+
+```{r}
+data.cs <- data.cs |>
+  # converting percentage columns to numeric values
+  mutate(across(all_of(percentage_cols), 
+                ~parse_number(as.character(.)) / 100) #columns specified in percentage_cols
+         )
+```
+
+### Convert date columns
+
+Use mdy function from lubridate package to convert strings to dates for
+date columns
+
+```{r}
+data.cs <- data.cs |>
+  mutate(
+    across(all_of(date_cols), ~mdy(.)) #convert strings to dates for date columns
+  )
+```
+
+### Convert categorical columns to Factors
+
+```{r}
+data.cs <- data.cs |>
+  mutate(
+    across(all_of(categorical_cols), as.factor) #converting to factors
+  )
+```
+
+### Remove all rows for loans that were paid back on the days/months they were issued
+
+final_data['loan_length'] = (final_data.last_pymnt_d -
+final_data.issue_d) / np.timedelta64(1, 'M') n_rows = len(final_data)
+
+```{r}
+data.cs <- data.cs |> 
+  mutate(
+    issue_d = as.Date(issue_d), #convert to date types
+    last_pymnt_d = as.Date(last_pymnt_d),
+    loan_length = as.integer(interval (issue_d, last_pymnt_d) / months(1)) 
+    # get the number of months from the interval... convert from days to months
+  ) |>
+filter(loan_length > 0) #filter to just see the loan lengths greater than 0 months
+```
+
+### Since all loan terms are in months
+
+Notice that terms are mentioned as 36 months, etc. Extract only the
+number e.g. 36 for each loan
+
+```{r}
+data.cs <- data.cs |>
+  #convert to characater first then parse just the number
+  mutate(term = parse_number(as.character(term)))
+  #mutate(term = parse_number(term)) # use parse_number
+```
+
+```{=tex}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{Created by Samiya Islam}  
+\fancyfoot[R]{\thepage}  
+\newpage
+```
+## Visualize variables
+
+If you find any outliers, remove them
+
+### Histogram
+
+```{r}
+# Check the column names in data.cs
+library(ggplot2)
+ggplot(data.cs, aes(x=loan_amnt)) + 
+  geom_histogram(binwidth=1000, fill="pink", color="black") +
+  labs(title="Visualization of Loan Amount", x="Loan Amount", y="Frequency")+
+  theme(plot.background = element_rect(fill = "pink"))
+```
+
+### Visually identify correlations
+
+It can be between the features as well as the features and the loan
+status.
+
+```{r}
+# correlation between loan amount and int_rate
+corr <- cor(data.cs$loan_amnt, data.cs$int_rate)
+print(paste("Correlation between Loan Amount and Interest Rate:", corr))
+```
+
+## Scatter plot
+
+```{r}
+ggplot(data.cs, aes(x = loan_amnt, y = loan_status)) +
+  geom_point(color = "black") +
+  labs(title = "Scatterplot of Loan Amount and its status", x = "Loan Amount", y = "Loan Status")+
+  theme(plot.background = element_rect(fill = "pink"))
+```
+
+Based on the scatter plot, loan amount and loan status are positively
+correlated. This means that, in general, larger loans are more likely to
+default or be charged off. We can also see that loans that are small and
+have a good status such as current and fully paid which means there is a
+large market for small loans, and that borrowers of small loans are
+generally able to repay them.
+
+## "Total Payment" and "Loan Status"
+
+```{r}
+ggplot(data.cs, aes(x = total_pymnt, y = loan_status)) +
+  geom_point(color = "black") +
+  labs(title = "Scatterplot of Loan Amount and its status", x = "Total Payment", y = "Loan Status")+
+  theme(plot.background = element_rect(fill = "pink"))
+```
+
+## "Last Payment day" and "Loan Status"
+
+```{r}
+ggplot(data.cs, aes(x = last_pymnt_d, y = loan_status)) +
+  geom_point(color = "black") +
+  labs(title = "Scatterplot of Loan Amount and its status", x = "Last Payment", y = "Loan Status")+
+  theme(plot.background = element_rect(fill = "pink"))
+```
+
+```{=tex}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{Created by Samiya Islam}  
+\fancyfoot[R]{\thepage}  
+\newpage
+```
+## M1 - Pessimistic Method
+
+```{r}
+# Calculate the return using a simple annualized profit margin
+# Pessimistic definition (Handout 6a.) (M1)
+data.cs <- data.cs |>
+  mutate(ret_PESS = ((total_pymnt - funded_amnt) / funded_amnt) * (12 / term)) 
+head(data.cs["ret_PESS"])
+```
+
+## M2 - Optimistic Method
+
+```{r}
+# Assuming that if a loan gives a positive return, we can
+# immediately find a similar loan to invest in; if the loan
+# takes a loss, we use M1-pessimistic to compute the return
+
+data.cs <- data.cs |>
+  mutate(
+    ret_OPT = case_when(
+      funded_amnt == 0 ~ NA_real_,  # Handle division by zero
+      total_pymnt - funded_amnt > 0 ~ ((total_pymnt - funded_amnt) / funded_amnt) * (12 / length(interval(issue_d, last_pymnt_d))),
+      total_pymnt - funded_amnt <= 0 ~ ((total_pymnt - funded_amnt) / funded_amnt) * (12 / as.numeric(term))
+    )
+  )
+head(data.cs["ret_OPT"])
+
+```
+
+## Visualize variables
+
+If you find any outliers, remove them
+
+```{r}
+# Bar plot for loan_amnt 
+ggplot(data.cs, aes(x = loan_amnt, fill = loan_status)) +
+  geom_bar() +
+  labs(title = "Visualizing of Loan Amount", x = "Loan Amount", y = "Count") +
+  scale_fill_manual(values = c("Fully Paid" = "red", "Charged Off" = "blue")) +
+  theme(plot.background = element_rect(fill = "pink"))
+```
+
+```{r}
+ggplot(data.cs, aes(x=grade, y=int_rate)) + 
+  geom_boxplot()+
+  labs(title = "Visualising interest rate", x = "Grade", y = "Interest Rate")+
+  geom_point(color="blue") +
+  theme(plot.background = element_rect(fill = "pink"))
+```
+
+```{=tex}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{Created by Samiya Islam}  
+\fancyfoot[R]{\thepage}  
+\newpage
+```
+## Compute answers to Q7
+
+```{r}
+# (i) What percentage of loans are in each grade?
+percentage_by_grade <- data.cs |>
+  group_by(grade) |>
+  summarize(percentage = n() / nrow(data.cs) * 100)
+print(percentage_by_grade)
+```
+
+```{r}
+# (ii) What is the default rate in each grade? How do you interpret those numbers?
+default_rates <- data.cs |>
+  group_by(grade) |> #group data by grade variable
+  summarize(default_rate = sum(loan_status == "Default") / n()) #for each group, calculates default rate by finding the ratio of loans with a default status over the total number of loans in the grade
+print(default_rates)
+
+```
+
+### (ii) Interpretation - Generally, the higher the grade, the lower the default rate. Loans that are Grade A have the lowest default rate and are considered best. Loans with a higher grade may have a reliable record of paying back on time and are thus, less risky. The A grade is an investment grade while the others are speculative.
+
+```{r}
+# (iii) What is the average interest rate in each grade?
+average_interest_rate <- data.cs |>
+  group_by(grade) |>
+  summarize(avg_interest_rate = mean(int_rate, na.rm = TRUE)) #gets the nmean interest rates for each grade
+print(average_interest_rate)
+
+```
+
+### (iii) Interpretation:
+
+```{r}
+avgerageInterestGrade <- data.cs |>
+  group_by(grade) |>
+  summarise(avgerageInterestRate=mean(int_rate))
+  ggplot(avgerageInterestGrade, 
+         aes(x=grade,
+             y=avgerageInterestRate,group=1)) +
+    labs(title = "Interpreting the average interest rate in each grade", 
+         x = "Grade", y = "Average Interest Rate")+
+    geom_line(color= "blue") + 
+    geom_line() + 
+    geom_point()+
+    theme(plot.background = element_rect(fill = "pink"))
+```
+
+According to the graph, we think there's a positive relationship between
+average interest rate and grade.
+
+```{r}
+# (iv) What is the average percentage (annual) return per grade
+# calculating average annual return for each grade 
+average_return <- data.cs |>
+  mutate(
+    loan_length = as.numeric(interval(issue_d, last_pymnt_d) / months(1)), #will calculate the loan length in months
+    annual_return = ((total_pymnt - funded_amnt) / funded_amnt) * (12 / loan_length) #calculates yearly return for each loan
+    
+  ) |>
+  group_by(grade) |>
+  summarize(avg_annual_return = mean(annual_return, na.rm = TRUE)) #calculates the mean annual return for each grade
+
+print(average_return)
+```
+
+### (v) Do these numbers surprise you? If you had to invest in one grade only, which loans would you invest in?
+
+These results are not that surprising, because they show the economical
+relationship and tradeoffs between risk and return.
+
+If we had to invest in one grade only because it has a generally low
+default rate, and while part iv shows Grade B loans also have low
+average annual return, it is to some extent higher than Grade A, D, and
+G's average annual return. Higher grades are less risky (lower default
+rate) but offer lower returns while lower grades are riskier but yield
+potentially higher returns. Grade B offers a balance between risk and
+return.
+
+## Table 2.1: Table to be filled based on Q7.
+
+```{r}
+# Summary table based on Table 2.1: Table to be filled based on Q7.
+summary_table <- data.cs |>
+  group_by(Grade = grade) |>
+  summarise(
+    `Avg. return` = mean(((total_pymnt - funded_amnt) / funded_amnt) * (12 / loan_length), na.rm = TRUE), 
+    `% of loans` = n() / nrow(data.cs) * 100,
+    `% Default` = sum(loan_status == "Default") / n(),
+    `avg. intrst` = mean(int_rate),
+    M1 = mean(ret_PESS, na.rm = TRUE),
+    M2 = mean(ret_OPT, na.rm = TRUE)
+  )
+
+# View the summary table
+summary_table
+
+```
+
+```{r}
+# Bar plot for % of loans in each grade
+ggplot(summary_table, aes(x = Grade, y = `% of loans`)) +
+  geom_bar(stat = "identity", fill = "pink") +
+  labs(title = "Percentage of Loans in Each Grade", x = "Grade", y = "% of Loans") +
+  theme(plot.background = element_rect(fill = "pink"))
+```
+
+### Save the clean data for future use
+
+```{r}
+save(data.cs, file = clean_data_file)
+
+```
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{Created by Samiya Islam}  
+\fancyfoot[R]{\thepage}  
+\newpage
+## Citations
+
+### BUS111 Phase II Group Project Additional Comments
+
+Outside Resources
+
+-   mutate() <https://dplyr.tidyverse.org/reference/mutate.html> We used
+    this function throughout our code and it basically creates new
+    columns
+
+-   across(all_of( )) Apply a function (or functions) across multiple
+    columns To access multiple columns that fit a certain criteria, and
+    modify them without doing so manually
+
+-   months(1) Divides the length of the interval (displayed in days)
+    into the number months (how many one months) Used this when
+    converting time intervals into months Get/set months component of a
+    date-time
+
+-   interval(date 1, date 2) Does a date (or interval) fall within an
+    interval? --- %within% • lubridate
+
+-   map_dfr(output, bind_rows) \# i haven;t taught you this function, so
+    don't worry about it. \# this line is basically taking a list and
+    stacking them up into a
+
+-   gsub() :
+    <https://www.geeksforgeeks.org/replace-all-the-matches-of-a-pattern-from-a-string-in-r-programming-gsub-function/#>
+    we used gsub function to remove the percentage sign
+
+-   \~parse_number():
+    <https://readr.tidyverse.org/reference/parse_number.html> We used it
+    as a way to conjunct the mutate function form the dplyr package to
+    apply a transformation to each element of a column
+
+-   as.Date():
+    <https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/as.Date>
+    We used this function to convert to data types
+
+-   cor(): We learned this function recently and it basically calculates
+    correlations between vectors. But I got a better understanding after
+    reading through this website;
+    <https://statsandr.com/blog/correlation-coefficient-and-correlation-test-in-r/>
+
+-   0 \~ NA_real\_ : Shows missing values for doubles.
+    <https://rstudio-pubs-static.s3.amazonaws.com/261838_71b13475011340ab94e9c51d8e462080.html>
+
+-   case_when(): Basically like if else statement evaluates conditions,
+    in our code we used it to create a new column-based on different
+    scenarios
+    <https://www.rdocumentation.org/packages/dplyr/versions/1.0.10/topics/case_when>
