@@ -1,5 +1,5 @@
 # LendingClubAnalysis
-In this study, I used the historical data from loans issued on LendingClub
+In this study, I used the historical data of loans issued on LendingClub
 between April 2008 and December 2019. It contains over 1.8 million loan listings with
 a total value exceeding $15 billion.
 
